@@ -1,0 +1,69 @@
+name: windows-detached-case
+on:
+  push:
+    branches:
+      - windows/detached
+jobs:
+  test-win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Setup mock server
+        run: |
+          $processOptions = @{
+            FilePath="python"
+            ArgumentList=".\mock_server\main.py", "--port", "9000"
+            PassThru=$true
+            RedirectStandardOutput="py-mock-server.log"
+          }
+          $mocksrvp = Start-Process @processOptions
+          $mocksrvp.Id | Out-File -FilePath "mock-server.pid"
+          Sleep 3
+          Invoke-WebRequest "http://127.0.0.1:9000/ok"
+      - name: Run cases
+        run: |
+          Invoke-WebRequest "http://127.0.0.1:9000/ok"
+      - name: Print mock server log
+        if: ${{ failure() }}
+        run: |
+          Get-Content -Path "py-mock-server.log" | Write-Host
+      - name: Post Setup mock server
+        if: ${{ always() }}
+        run: |
+          Try {
+            $mocksrvpid = Get-Content -Path "mock-server.pid"
+            Stop-Process -Id $mocksrvpid
+            Remove-Item -Path "mock-server.pid"
+            Remove-Item -Path "py-mock-server.log"
+          } Catch {
+            Write-Host -Object $_
+          }
+
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Setup mock server
+        run: |
+          nohup python ./mock_server/main.py --port 9000 > py-mock-server.log 2>&1 &
+          echo $! > mock-server.pid
+          sleep 3
+          curl -sS "http://127.0.0.1:9000/ok"
+      - name: Run cases
+        run: |
+          curl -sS "http://127.0.0.1:9000/ok"
+      - name: Print mock server log
+        if: ${{ failure() }}
+        run: |
+          cat py-mock-server.log
+      - name: Post Setup mock server
+        if: ${{ always() }}
+        run: |
+          cat mock-server.pid | xargs kill
+          rm mock-server.pid py-mock-server.log
